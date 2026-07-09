@@ -1,0 +1,11 @@
+services:
+  tests:
+    image: buildkite/plugin-tester:v4.3.0
+    volumes:
+      - ".:/plugin:ro"
+
+  lint:
+    image: buildkite/plugin-linter
+    command: ["--id", "socket"]
+    volumes:
+      - ".:/plugin:ro"
