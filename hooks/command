@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/plugin.bash
+source "${DIR}/lib/plugin.bash"
+
+enable_debug_if_requested
+
+# Default repository name: the short name from BUILDKITE_REPO, e.g.
+#   https://github.com/buildkite/cli.git -> cli
+#   git@github.com:buildkite/cli.git     -> cli
+# falling back to the pipeline slug when BUILDKITE_REPO is unset.
+default_repo() {
+  local url="${BUILDKITE_REPO:-}"
+  if [[ -z "${url}" ]]; then
+    echo "${BUILDKITE_PIPELINE_SLUG:-}"
+    return
+  fi
+  url="${url%.git}"
+  echo "${url##*/}"
+}
+
+# --- Read configuration -----------------------------------------------------
+API_TOKEN_ENV="$(plugin_read_config API_TOKEN_ENV "SOCKET_SECURITY_API_KEY")"
+DIRECTORY="$(plugin_read_config DIRECTORY ".")"
+REPORT="$(plugin_read_config REPORT "true")"
+AUTO_MANIFEST="$(plugin_read_config AUTO_MANIFEST "false")"
+REPO="$(plugin_read_config REPO "$(default_repo)")"
+BRANCH="$(plugin_read_config BRANCH "${BUILDKITE_BRANCH:-}")"
+VERSION="$(plugin_read_config VERSION "latest")"
+INSTALL="$(plugin_read_config INSTALL "true")"
+
+# --- Resolve and export the API token --------------------------------------
+TOKEN_VALUE="${!API_TOKEN_ENV:-}"
+if [[ -z "${TOKEN_VALUE}" ]]; then
+  log_error "No Socket API token found in \$${API_TOKEN_ENV}."
+  log_error "Set it as a secret/environment variable, or point 'api-token-env' at the variable that holds it."
+  exit 1
+fi
+export SOCKET_SECURITY_API_KEY="${TOKEN_VALUE}"
+
+# --- Ensure the Socket CLI is available ------------------------------------
+if ! command_exists socket; then
+  if [[ "${INSTALL}" =~ (true|on|1) ]]; then
+    log_info "Installing Socket CLI (socket@${VERSION})"
+    npm install -g "socket@${VERSION}"
+  else
+    log_error "Socket CLI not found and install is disabled. Install 'socket' or set install: true."
+    exit 1
+  fi
+fi
+
+# --- Build the command ------------------------------------------------------
+cmd=(socket scan create)
+
+if [[ "${REPORT}" =~ (true|on|1) ]]; then
+  cmd+=(--report)
+fi
+
+if [[ "${AUTO_MANIFEST}" =~ (true|on|1) ]]; then
+  cmd+=(--auto-manifest)
+fi
+
+if [[ -n "${REPO}" ]]; then
+  cmd+=("--repo=${REPO}")
+fi
+
+if [[ -n "${BRANCH}" ]]; then
+  cmd+=("--branch=${BRANCH}")
+fi
+
+if plugin_read_list_into_result ARGS; then
+  cmd+=("${result[@]}")
+fi
+
+cmd+=("${DIRECTORY}")
+
+# --- Run --------------------------------------------------------------------
+echo "--- :socket: Running Socket scan"
+log_info "${cmd[*]}"
+
+"${cmd[@]}"
