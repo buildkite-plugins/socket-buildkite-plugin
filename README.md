@@ -54,6 +54,24 @@ Wait for the report and fail the build if the scan violates your security or lic
 
 Auto-generate manifest files for ecosystems that require it (for example, Gradle or sbt). Defaults to `false`.
 
+### `org` (string)
+
+Socket organization slug to scan under. Defaults to `$SOCKET_CLI_ORG_SLUG`. In
+CI the plugin always runs the CLI with `--no-interactive`, so if your API token
+is associated with more than one organization you must set this (or
+`$SOCKET_CLI_ORG_SLUG`) — otherwise the CLI cannot resolve the org and the scan
+fails instead of prompting.
+
+```yaml
+steps:
+  - label: ":socket: Socket scan"
+    secrets:
+      - SOCKET_SECURITY_API_KEY
+    plugins:
+      - socket#v1.0.0:
+          org: my-org-slug
+```
+
 ### `repo` (string)
 
 Repository name to associate the scan with. Defaults to the repository name

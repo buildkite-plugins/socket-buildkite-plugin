@@ -24,6 +24,12 @@ configuration:
       description: >-
         Auto-generate manifest files for ecosystems that require it (e.g. Gradle,
         sbt). Defaults to false.
+    org:
+      type: string
+      description: >-
+        Socket organization slug to scan under. Defaults to SOCKET_CLI_ORG_SLUG.
+        Required in CI when your API token is associated with more than one org,
+        otherwise the CLI cannot resolve the org non-interactively.
     repo:
       type: string
       description: >-

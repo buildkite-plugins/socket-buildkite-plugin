@@ -11,13 +11,13 @@ setup() {
   export BUILDKITE_BRANCH="main"
 }
 
-@test "Runs socket scan create --report by default" {
-  stub socket "scan create --report --repo=my-repo --branch=main . : echo scan complete"
+@test "Runs socket scan create --no-interactive --report by default" {
+  stub socket "scan create --no-interactive --report --repo=my-repo --branch=main . : echo scan complete"
 
   run "$PWD/hooks/command"
 
   assert_success
-  assert_output --partial "scan create --report --repo=my-repo --branch=main ."
+  assert_output --partial "scan create --no-interactive --report --repo=my-repo --branch=main ."
   assert_output --partial "scan complete"
 
   unstub socket
@@ -27,7 +27,7 @@ setup() {
   unset BUILDKITE_PIPELINE_SLUG
   export BUILDKITE_REPO="https://github.com/buildkite/cli.git"
 
-  stub socket "scan create --report --repo=cli --branch=main . : echo ok"
+  stub socket "scan create --no-interactive --report --repo=cli --branch=main . : echo ok"
 
   run "$PWD/hooks/command"
 
@@ -41,7 +41,7 @@ setup() {
   unset BUILDKITE_PIPELINE_SLUG
   export BUILDKITE_REPO="git@github.com:buildkite/cli.git"
 
-  stub socket "scan create --report --repo=cli --branch=main . : echo ok"
+  stub socket "scan create --no-interactive --report --repo=cli --branch=main . : echo ok"
 
   run "$PWD/hooks/command"
 
@@ -55,7 +55,7 @@ setup() {
   export BUILDKITE_REPO="https://github.com/buildkite/cli.git"
   export BUILDKITE_PLUGIN_SOCKET_REPO="custom-name"
 
-  stub socket "scan create --report --repo=custom-name --branch=main . : echo ok"
+  stub socket "scan create --no-interactive --report --repo=custom-name --branch=main . : echo ok"
 
   run "$PWD/hooks/command"
 
@@ -68,7 +68,7 @@ setup() {
 @test "Omits --report when report is false" {
   export BUILDKITE_PLUGIN_SOCKET_REPORT="false"
 
-  stub socket "scan create --repo=my-repo --branch=main . : echo scan complete"
+  stub socket "scan create --no-interactive --repo=my-repo --branch=main . : echo scan complete"
 
   run "$PWD/hooks/command"
 
@@ -81,7 +81,7 @@ setup() {
 @test "Adds --auto-manifest when enabled" {
   export BUILDKITE_PLUGIN_SOCKET_AUTO_MANIFEST="true"
 
-  stub socket "scan create --report --auto-manifest --repo=my-repo --branch=main . : echo ok"
+  stub socket "scan create --no-interactive --report --auto-manifest --repo=my-repo --branch=main . : echo ok"
 
   run "$PWD/hooks/command"
 
@@ -94,7 +94,7 @@ setup() {
 @test "Uses a custom directory" {
   export BUILDKITE_PLUGIN_SOCKET_DIRECTORY="./app"
 
-  stub socket "scan create --report --repo=my-repo --branch=main ./app : echo ok"
+  stub socket "scan create --no-interactive --report --repo=my-repo --branch=main ./app : echo ok"
 
   run "$PWD/hooks/command"
 
@@ -106,14 +106,38 @@ setup() {
 
 @test "Passes through extra args" {
   export BUILDKITE_PLUGIN_SOCKET_ARGS_0="--json"
-  export BUILDKITE_PLUGIN_SOCKET_ARGS_1="--no-interactive"
+  export BUILDKITE_PLUGIN_SOCKET_ARGS_1="--markdown"
 
-  stub socket "scan create --report --repo=my-repo --branch=main --json --no-interactive . : echo ok"
+  stub socket "scan create --no-interactive --report --repo=my-repo --branch=main --json --markdown . : echo ok"
 
   run "$PWD/hooks/command"
 
   assert_success
-  assert_output --partial "--json --no-interactive"
+  assert_output --partial "--json --markdown"
+
+  unstub socket
+}
+
+@test "Runs non-interactively" {
+  stub socket "scan create --no-interactive --report --repo=my-repo --branch=main . : echo ok"
+
+  run "$PWD/hooks/command"
+
+  assert_success
+  assert_output --partial "--no-interactive"
+
+  unstub socket
+}
+
+@test "Passes --org when set" {
+  export BUILDKITE_PLUGIN_SOCKET_ORG="buildkite"
+
+  stub socket "scan create --no-interactive --report --org=buildkite --repo=my-repo --branch=main . : echo ok"
+
+  run "$PWD/hooks/command"
+
+  assert_success
+  assert_output --partial "--org=buildkite"
 
   unstub socket
 }
@@ -123,7 +147,7 @@ setup() {
   export MY_SOCKET_TOKEN="custom-token"
   export BUILDKITE_PLUGIN_SOCKET_API_TOKEN_ENV="MY_SOCKET_TOKEN"
 
-  stub socket "scan create --report --repo=my-repo --branch=main . : echo ok"
+  stub socket "scan create --no-interactive --report --repo=my-repo --branch=main . : echo ok"
 
   run "$PWD/hooks/command"
 
@@ -142,7 +166,7 @@ setup() {
 }
 
 @test "Fails the build when the scan violates policy" {
-  stub socket "scan create --report --repo=my-repo --branch=main . : echo policy violation; exit 1"
+  stub socket "scan create --no-interactive --report --repo=my-repo --branch=main . : echo policy violation; exit 1"
 
   run "$PWD/hooks/command"
 

@@ -26,6 +26,7 @@ API_TOKEN_ENV="$(plugin_read_config API_TOKEN_ENV "SOCKET_SECURITY_API_KEY")"
 DIRECTORY="$(plugin_read_config DIRECTORY ".")"
 REPORT="$(plugin_read_config REPORT "true")"
 AUTO_MANIFEST="$(plugin_read_config AUTO_MANIFEST "false")"
+ORG="$(plugin_read_config ORG "${SOCKET_CLI_ORG_SLUG:-}")"
 REPO="$(plugin_read_config REPO "$(default_repo)")"
 BRANCH="$(plugin_read_config BRANCH "${BUILDKITE_BRANCH:-}")"
 VERSION="$(plugin_read_config VERSION "latest")"
@@ -52,7 +53,9 @@ if ! command_exists socket; then
 fi
 
 # --- Build the command ------------------------------------------------------
-cmd=(socket scan create)
+# --no-interactive ensures the CLI never blocks on a prompt in CI (for example,
+# when the org cannot be resolved); it fails fast instead.
+cmd=(socket scan create --no-interactive)
 
 if [[ "${REPORT}" =~ (true|on|1) ]]; then
   cmd+=(--report)
@@ -60,6 +63,10 @@ fi
 
 if [[ "${AUTO_MANIFEST}" =~ (true|on|1) ]]; then
   cmd+=(--auto-manifest)
+fi
+
+if [[ -n "${ORG}" ]]; then
+  cmd+=("--org=${ORG}")
 fi
 
 if [[ -n "${REPO}" ]]; then
