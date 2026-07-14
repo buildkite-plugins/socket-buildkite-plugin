@@ -25,12 +25,18 @@ default_repo() {
 API_TOKEN_ENV="$(plugin_read_config API_TOKEN_ENV "SOCKET_SECURITY_API_KEY")"
 DIRECTORY="$(plugin_read_config DIRECTORY ".")"
 REPORT="$(plugin_read_config REPORT "true")"
+ANNOTATE="$(plugin_read_config ANNOTATE "false")"
 AUTO_MANIFEST="$(plugin_read_config AUTO_MANIFEST "false")"
 ORG="$(plugin_read_config ORG "${SOCKET_CLI_ORG_SLUG:-}")"
 REPO="$(plugin_read_config REPO "$(default_repo)")"
 BRANCH="$(plugin_read_config BRANCH "${BUILDKITE_BRANCH:-}")"
 VERSION="$(plugin_read_config VERSION "latest")"
 INSTALL="$(plugin_read_config INSTALL "true")"
+
+if [[ "${ANNOTATE}" =~ (true|on|1) ]] && [[ ! "${REPORT}" =~ (true|on|1) ]]; then
+  log_error "The 'annotate' option requires 'report: true' so Socket waits for and retrieves the policy findings."
+  exit 1
+fi
 
 # --- Resolve and export the API token --------------------------------------
 TOKEN_VALUE="${!API_TOKEN_ENV:-}"
@@ -77,14 +83,107 @@ if [[ -n "${BRANCH}" ]]; then
   cmd+=("--branch=${BRANCH}")
 fi
 
+EXTRA_ARGS=()
 if plugin_read_list_into_result ARGS; then
-  cmd+=("${result[@]}")
+  EXTRA_ARGS=("${result[@]}")
 fi
 
+if [[ "${ANNOTATE}" =~ (true|on|1) ]]; then
+  for arg in "${EXTRA_ARGS[@]}"; do
+    case "${arg}" in
+      --json|--json=*|-j|-j=*)
+        log_error "The 'annotate' option cannot be combined with '${arg}' in 'args'; annotations require Markdown output."
+        exit 1
+        ;;
+      --no-report|--report=false)
+        log_error "The 'annotate' option cannot be combined with '${arg}' in 'args'; annotations require policy reporting."
+        exit 1
+        ;;
+    esac
+  done
+fi
+
+cmd+=("${EXTRA_ARGS[@]}")
+if [[ "${ANNOTATE}" =~ (true|on|1) ]]; then
+  # Append this after user-provided arguments so annotation mode owns the
+  # final output format, including when args contains --no-markdown.
+  cmd+=(--markdown)
+fi
 cmd+=("${DIRECTORY}")
 
 # --- Run --------------------------------------------------------------------
 echo "--- :socket: Running Socket scan"
 log_info "${cmd[*]}"
 
-"${cmd[@]}"
+if [[ ! "${ANNOTATE}" =~ (true|on|1) ]]; then
+  "${cmd[@]}"
+  exit
+fi
+
+ANNOTATION_FILE="$(mktemp "${TMPDIR:-/tmp}/socket-annotation.XXXXXX")"
+TRUNCATED_ANNOTATION_FILE="${ANNOTATION_FILE}.truncated"
+trap 'rm -f "${ANNOTATION_FILE}" "${TRUNCATED_ANNOTATION_FILE}"' EXIT
+
+# Socket sends only the Markdown payload to stdout in this mode. Keep showing
+# it in the job log while retaining a copy for the Buildkite annotation.
+set +e
+"${cmd[@]}" | tee "${ANNOTATION_FILE}"
+SCAN_STATUS="${PIPESTATUS[0]}"
+set -e
+
+if [[ ! -s "${ANNOTATION_FILE}" ]]; then
+  cat > "${ANNOTATION_FILE}" <<'EOF'
+# Socket scan
+
+The Socket CLI did not produce a report. See the job log for details.
+EOF
+fi
+
+# Buildkite limits each annotation body to 1 MiB. Keep complete Markdown lines
+# below that limit and leave the full report in the job log streamed by tee.
+ANNOTATION_MAX_BYTES=1048000
+ANNOTATION_SIZE_BYTES="$(wc -c < "${ANNOTATION_FILE}")"
+if (( ANNOTATION_SIZE_BYTES > ANNOTATION_MAX_BYTES )); then
+  TRUNCATION_NOTICE=$'\n\n---\n\n_This annotation was truncated to fit Buildkite’s 1 MiB limit. The complete Socket report remains available in the job log._\n'
+  TRUNCATION_NOTICE_BYTES="$(printf '%s' "${TRUNCATION_NOTICE}" | wc -c)"
+  ANNOTATION_CONTENT_MAX_BYTES=$((ANNOTATION_MAX_BYTES - TRUNCATION_NOTICE_BYTES))
+
+  LC_ALL=C awk -v max="${ANNOTATION_CONTENT_MAX_BYTES}" '
+    {
+      line = $0 ORS
+      if (bytes + length(line) > max) {
+        exit
+      }
+      printf "%s", line
+      bytes += length(line)
+    }
+  ' "${ANNOTATION_FILE}" > "${TRUNCATED_ANNOTATION_FILE}"
+  printf '%s' "${TRUNCATION_NOTICE}" >> "${TRUNCATED_ANNOTATION_FILE}"
+  mv "${TRUNCATED_ANNOTATION_FILE}" "${ANNOTATION_FILE}"
+fi
+
+if [[ "${SCAN_STATUS}" -eq 0 ]]; then
+  ANNOTATION_STYLE="success"
+else
+  ANNOTATION_STYLE="error"
+fi
+
+ANNOTATION_CONTEXT="socket-${BUILDKITE_JOB_ID:-scan}"
+ANNOTATION_STATUS=0
+BUILDKITE_ANNOTATION_SCOPE="build" \
+  buildkite-agent annotate \
+    --style "${ANNOTATION_STYLE}" \
+    --context "${ANNOTATION_CONTEXT}" \
+    < "${ANNOTATION_FILE}" || ANNOTATION_STATUS=$?
+
+if [[ "${ANNOTATION_STATUS}" -ne 0 ]]; then
+  log_error "Failed to create the Socket build annotation."
+fi
+
+# A scan failure is the primary result; otherwise fail if annotation creation
+# was requested but unsuccessful.
+if [[ "${SCAN_STATUS}" -ne 0 ]]; then
+  exit "${SCAN_STATUS}"
+fi
+
+exit "${ANNOTATION_STATUS}"

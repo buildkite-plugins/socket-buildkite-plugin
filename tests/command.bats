@@ -78,6 +78,118 @@ setup() {
   unstub socket
 }
 
+@test "Annotates the build with Markdown findings when enabled" {
+  export BUILDKITE_PLUGIN_SOCKET_ANNOTATE="true"
+  export BUILDKITE_JOB_ID="job-123"
+
+  stub socket "scan create --no-interactive --report --repo=my-repo --branch=main --markdown . : printf '%s\n' '# Scan Policy Report' '' 'No findings'"
+  stub buildkite-agent "annotate --style success --context socket-job-123 : test \"\$BUILDKITE_ANNOTATION_SCOPE\" = build && cat"
+
+  run "$PWD/hooks/command"
+
+  assert_success
+  assert_output --partial "# Scan Policy Report"
+  assert_output --partial "No findings"
+
+  unstub socket
+  unstub buildkite-agent
+}
+
+@test "Annotates failed findings and preserves the scan exit status" {
+  export BUILDKITE_PLUGIN_SOCKET_ANNOTATE="true"
+  export BUILDKITE_JOB_ID="job-456"
+
+  stub socket "scan create --no-interactive --report --repo=my-repo --branch=main --markdown . : printf '%s\n' '# Scan Policy Report' '' 'Policy violation'; exit 7"
+  stub buildkite-agent "annotate --style error --context socket-job-456 : test \"\$BUILDKITE_ANNOTATION_SCOPE\" = build && cat"
+
+  run "$PWD/hooks/command"
+
+  [ "${status}" -eq 7 ]
+  assert_output --partial "Policy violation"
+
+  unstub socket
+  unstub buildkite-agent
+}
+
+@test "Rejects JSON output forms when annotations are enabled" {
+  export BUILDKITE_PLUGIN_SOCKET_ANNOTATE="true"
+
+  stub socket
+
+  for json_arg in --json --json=true -j -j=true; do
+    export BUILDKITE_PLUGIN_SOCKET_ARGS="${json_arg}"
+
+    run "$PWD/hooks/command"
+
+    assert_failure
+    assert_output --partial "annotations require Markdown output"
+  done
+
+  unstub socket
+}
+
+@test "Rejects report-disabling arguments when annotations are enabled" {
+  export BUILDKITE_PLUGIN_SOCKET_ANNOTATE="true"
+
+  stub socket
+
+  for report_arg in --no-report --report=false; do
+    export BUILDKITE_PLUGIN_SOCKET_ARGS="${report_arg}"
+
+    run "$PWD/hooks/command"
+
+    assert_failure
+    assert_output --partial "annotations require policy reporting"
+  done
+
+  unstub socket
+}
+
+@test "Rejects annotations when report is disabled" {
+  export BUILDKITE_PLUGIN_SOCKET_ANNOTATE="true"
+  export BUILDKITE_PLUGIN_SOCKET_REPORT="false"
+
+  run "$PWD/hooks/command"
+
+  assert_failure
+  assert_output --partial "requires 'report: true'"
+}
+
+@test "Appends Markdown mode after user-provided arguments" {
+  export BUILDKITE_PLUGIN_SOCKET_ANNOTATE="true"
+  export BUILDKITE_PLUGIN_SOCKET_ARGS="--no-markdown"
+  export BUILDKITE_JOB_ID="job-789"
+
+  stub socket "scan create --no-interactive --report --repo=my-repo --branch=main --no-markdown --markdown . : echo '# Scan Policy Report'"
+  stub buildkite-agent "annotate --style success --context socket-job-789 : cat"
+
+  run "$PWD/hooks/command"
+
+  assert_success
+
+  unstub socket
+  unstub buildkite-agent
+}
+
+@test "Truncates oversized annotations while retaining the full job log" {
+  export BUILDKITE_PLUGIN_SOCKET_ANNOTATE="true"
+  export BUILDKITE_JOB_ID="job-large"
+  export ANNOTATION_CAPTURE="${BATS_TEST_TMPDIR}/annotation.md"
+
+  stub socket "scan create --no-interactive --report --repo=my-repo --branch=main --markdown . : awk 'BEGIN { print \"# Scan Policy Report\"; for (i = 0; i < 30000; i++) print \"Finding \" i \": abcdefghijklmnopqrstuvwxyz\" }'"
+  stub buildkite-agent "annotate --style success --context socket-job-large : cat > \"\$ANNOTATION_CAPTURE\""
+
+  run "$PWD/hooks/command"
+
+  assert_success
+  assert_output --partial "Finding 29999"
+  [ "$(wc -c < "${ANNOTATION_CAPTURE}")" -lt 1048576 ]
+  grep -q "truncated to fit Buildkite" "${ANNOTATION_CAPTURE}"
+
+  unstub socket
+  unstub buildkite-agent
+}
+
 @test "Adds --auto-manifest when enabled" {
   export BUILDKITE_PLUGIN_SOCKET_AUTO_MANIFEST="true"
 
