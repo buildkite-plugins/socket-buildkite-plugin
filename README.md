@@ -50,17 +50,27 @@ Directory to scan. Defaults to `.`.
 
 Wait for the report and fail the build if the scan violates your security or license policy. Defaults to `true`. Set to `false` to create a scan without gating the build.
 
+### `annotate` (boolean)
+
+Publish the Socket findings as a Buildkite build annotation. Defaults to `false`. The annotation is build-scoped and uses Socket's Markdown output. This option requires `report: true` so Socket waits for and retrieves the policy findings.
+
+```yaml
+steps:
+  - label: ":socket: Socket scan"
+    plugins:
+      - socket#v1.0.0:
+          annotate: true
+```
+
+Because annotations require Markdown output, `annotate: true` cannot be combined with `--json` in `args`. It also cannot be combined with `--no-report` or `--report=false`, because Socket must wait for the policy findings. Reports larger than Buildkite's 1 MiB annotation limit are truncated at a complete Markdown line with a visible notice; the complete report remains available in the job log.
+
 ### `auto-manifest` (boolean)
 
 Auto-generate manifest files for ecosystems that require it (for example, Gradle or sbt). Defaults to `false`.
 
 ### `org` (string)
 
-Socket organization slug to scan under. Defaults to `$SOCKET_CLI_ORG_SLUG`. In
-CI the plugin always runs the CLI with `--no-interactive`, so if your API token
-is associated with more than one organization you must set this (or
-`$SOCKET_CLI_ORG_SLUG`) — otherwise the CLI cannot resolve the org and the scan
-fails instead of prompting.
+Socket organization slug to scan under. Defaults to `$SOCKET_CLI_ORG_SLUG`. In CI the plugin always runs the CLI with `--no-interactive`, so if your API token is associated with more than one organization you must set this (or `$SOCKET_CLI_ORG_SLUG`) — otherwise the CLI cannot resolve the org and the scan fails instead of prompting.
 
 ```yaml
 steps:
@@ -74,9 +84,7 @@ steps:
 
 ### `repo` (string)
 
-Repository name to associate the scan with. Defaults to the repository name
-derived from `$BUILDKITE_REPO` (for example, `cli` from
-`https://github.com/buildkite/cli.git`), falling back to `$BUILDKITE_PIPELINE_SLUG`.
+Repository name to associate the scan with. Defaults to the repository name derived from `$BUILDKITE_REPO` (for example, `cli` from `https://github.com/buildkite/cli.git`), falling back to `$BUILDKITE_PIPELINE_SLUG`.
 
 ### `branch` (string)
 
