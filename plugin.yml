@@ -19,6 +19,11 @@ configuration:
       description: >-
         Wait for the report and fail the build if the scan violates your
         security or license policy. Defaults to true.
+    annotate:
+      type: boolean
+      description: >-
+        Publish the Socket findings as a Buildkite build annotation. Defaults
+        to false. Requires report to be true.
     auto-manifest:
       type: boolean
       description: >-
