@@ -62,7 +62,7 @@ steps:
           annotate: true
 ```
 
-Because annotations require Markdown output, `annotate: true` cannot be combined with `--json` in `args`. It also cannot be combined with `--no-report` or `--report=false`, because Socket must wait for the policy findings. Reports larger than Buildkite's 1 MiB annotation limit are truncated at a complete Markdown line with a visible notice; the complete report remains available in the job log.
+Because annotations require Markdown output, `annotate: true` cannot be combined with `--json` in `args`. It also cannot be combined with `--no-report` or `--report=false`, because Socket must wait for the policy findings. The plugin appends `--markdown` after user-supplied arguments, so a user-supplied `--no-markdown` is overridden. Each annotation uses a job-specific context, so multiple Socket steps in the same build produce separate annotations. Reports larger than Buildkite's 1 MiB annotation limit are truncated at a complete Markdown line with a visible notice; the complete report remains available in the job log.
 
 ### `auto-manifest` (boolean)
 

@@ -38,6 +38,26 @@ if [[ "${ANNOTATE}" =~ (true|on|1) ]] && [[ ! "${REPORT}" =~ (true|on|1) ]]; the
   exit 1
 fi
 
+EXTRA_ARGS=()
+if plugin_read_list_into_result ARGS; then
+  EXTRA_ARGS=("${result[@]}")
+
+  if [[ "${ANNOTATE}" =~ (true|on|1) ]]; then
+    for arg in "${EXTRA_ARGS[@]}"; do
+      case "${arg}" in
+        --json|--json=true|-j|-j=true)
+          log_error "The 'annotate' option cannot be combined with '${arg}' in 'args'; annotations require Markdown output."
+          exit 1
+          ;;
+        --no-report|--report=false)
+          log_error "The 'annotate' option cannot be combined with '${arg}' in 'args'; annotations require policy reporting."
+          exit 1
+          ;;
+      esac
+    done
+  fi
+fi
+
 # --- Resolve and export the API token --------------------------------------
 TOKEN_VALUE="${!API_TOKEN_ENV:-}"
 if [[ -z "${TOKEN_VALUE}" ]]; then
@@ -83,27 +103,9 @@ if [[ -n "${BRANCH}" ]]; then
   cmd+=("--branch=${BRANCH}")
 fi
 
-EXTRA_ARGS=()
-if plugin_read_list_into_result ARGS; then
-  EXTRA_ARGS=("${result[@]}")
+if (( ${#EXTRA_ARGS[@]} > 0 )); then
+  cmd+=("${EXTRA_ARGS[@]}")
 fi
-
-if [[ "${ANNOTATE}" =~ (true|on|1) ]]; then
-  for arg in "${EXTRA_ARGS[@]}"; do
-    case "${arg}" in
-      --json|--json=*|-j|-j=*)
-        log_error "The 'annotate' option cannot be combined with '${arg}' in 'args'; annotations require Markdown output."
-        exit 1
-        ;;
-      --no-report|--report=false)
-        log_error "The 'annotate' option cannot be combined with '${arg}' in 'args'; annotations require policy reporting."
-        exit 1
-        ;;
-    esac
-  done
-fi
-
-cmd+=("${EXTRA_ARGS[@]}")
 if [[ "${ANNOTATE}" =~ (true|on|1) ]]; then
   # Append this after user-provided arguments so annotation mode owns the
   # final output format, including when args contains --no-markdown.
@@ -128,10 +130,19 @@ trap 'rm -f "${ANNOTATION_FILE}" "${TRUNCATED_ANNOTATION_FILE}"' EXIT
 # it in the job log while retaining a copy for the Buildkite annotation.
 set +e
 "${cmd[@]}" | tee "${ANNOTATION_FILE}"
-SCAN_STATUS="${PIPESTATUS[0]}"
+PIPE_STATUSES=("${PIPESTATUS[@]}")
 set -e
+SCAN_STATUS="${PIPE_STATUSES[0]}"
+TEE_STATUS="${PIPE_STATUSES[1]}"
 
-if [[ ! -s "${ANNOTATION_FILE}" ]]; then
+if [[ "${TEE_STATUS}" -ne 0 ]]; then
+  log_error "Failed to capture the Socket report for the build annotation (tee exited ${TEE_STATUS})."
+  cat > "${ANNOTATION_FILE}" <<'EOF'
+# Socket scan
+
+The Socket report could not be captured for the build annotation. See the job log for the full report.
+EOF
+elif [[ ! -s "${ANNOTATION_FILE}" ]]; then
   cat > "${ANNOTATION_FILE}" <<'EOF'
 # Socket scan
 
@@ -162,7 +173,7 @@ if (( ANNOTATION_SIZE_BYTES > ANNOTATION_MAX_BYTES )); then
   mv "${TRUNCATED_ANNOTATION_FILE}" "${ANNOTATION_FILE}"
 fi
 
-if [[ "${SCAN_STATUS}" -eq 0 ]]; then
+if [[ "${SCAN_STATUS}" -eq 0 ]] && [[ "${TEE_STATUS}" -eq 0 ]]; then
   ANNOTATION_STYLE="success"
 else
   ANNOTATION_STYLE="error"
@@ -180,10 +191,14 @@ if [[ "${ANNOTATION_STATUS}" -ne 0 ]]; then
   log_error "Failed to create the Socket build annotation."
 fi
 
-# A scan failure is the primary result; otherwise fail if annotation creation
-# was requested but unsuccessful.
+# A scan failure is the primary result. Otherwise fail if the report could not
+# be captured or annotation creation was unsuccessful.
 if [[ "${SCAN_STATUS}" -ne 0 ]]; then
   exit "${SCAN_STATUS}"
+fi
+
+if [[ "${TEE_STATUS}" -ne 0 ]]; then
+  exit "${TEE_STATUS}"
 fi
 
 exit "${ANNOTATION_STATUS}"

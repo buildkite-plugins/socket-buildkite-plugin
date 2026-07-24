@@ -111,6 +111,49 @@ setup() {
   unstub buildkite-agent
 }
 
+@test "Fails the build when annotation creation fails" {
+  export BUILDKITE_PLUGIN_SOCKET_ANNOTATE="true"
+  export BUILDKITE_JOB_ID="job-999"
+
+  stub socket "scan create --no-interactive --report --repo=my-repo --branch=main --markdown . : echo '# Scan Policy Report'"
+  stub buildkite-agent "annotate --style success --context socket-job-999 : cat >/dev/null; exit 5"
+
+  run "$PWD/hooks/command"
+
+  [ "${status}" -eq 5 ]
+  assert_output --partial "Failed to create the Socket build annotation."
+
+  unstub socket
+  unstub buildkite-agent
+}
+
+@test "Fails the build and publishes a notice when report capture fails" {
+  export BUILDKITE_PLUGIN_SOCKET_ANNOTATE="true"
+  export BUILDKITE_JOB_ID="job-capture-failed"
+  export ANNOTATION_CAPTURE="${BATS_TEST_TMPDIR}/annotation.md"
+  mkdir -p "${BATS_TEST_TMPDIR}/bin"
+  cat > "${BATS_TEST_TMPDIR}/bin/tee" <<'EOF'
+#!/usr/bin/env bash
+cat
+printf 'partial report' > "$1"
+exit 9
+EOF
+  chmod +x "${BATS_TEST_TMPDIR}/bin/tee"
+  export PATH="${BATS_TEST_TMPDIR}/bin:${PATH}"
+
+  stub socket "scan create --no-interactive --report --repo=my-repo --branch=main --markdown . : echo '# Scan Policy Report'"
+  stub buildkite-agent "annotate --style error --context socket-job-capture-failed : cat > \"\$ANNOTATION_CAPTURE\""
+
+  run "$PWD/hooks/command"
+
+  [ "${status}" -eq 9 ]
+  assert_output --partial "Failed to capture the Socket report"
+  grep -q "could not be captured" "${ANNOTATION_CAPTURE}"
+
+  unstub socket
+  unstub buildkite-agent
+}
+
 @test "Rejects JSON output forms when annotations are enabled" {
   export BUILDKITE_PLUGIN_SOCKET_ANNOTATE="true"
 
@@ -126,6 +169,29 @@ setup() {
   done
 
   unstub socket
+}
+
+@test "Allows explicitly disabled JSON output when annotations are enabled" {
+  export BUILDKITE_PLUGIN_SOCKET_ANNOTATE="true"
+  export BUILDKITE_JOB_ID="job-json-false"
+
+  stub socket \
+    "scan create --no-interactive --report --repo=my-repo --branch=main --json=false --markdown . : echo '# Scan Policy Report'" \
+    "scan create --no-interactive --report --repo=my-repo --branch=main -j=false --markdown . : echo '# Scan Policy Report'"
+  stub buildkite-agent \
+    "annotate --style success --context socket-job-json-false : cat >/dev/null" \
+    "annotate --style success --context socket-job-json-false : cat >/dev/null"
+
+  for json_arg in --json=false -j=false; do
+    export BUILDKITE_PLUGIN_SOCKET_ARGS="${json_arg}"
+
+    run "$PWD/hooks/command"
+
+    assert_success
+  done
+
+  unstub socket
+  unstub buildkite-agent
 }
 
 @test "Rejects report-disabling arguments when annotations are enabled" {
