@@ -67,21 +67,40 @@ if [[ -z "${TOKEN_VALUE}" ]]; then
 fi
 export SOCKET_SECURITY_API_KEY="${TOKEN_VALUE}"
 
-# --- Ensure the Socket CLI is available ------------------------------------
-if ! command_exists socket; then
-  if [[ "${INSTALL}" =~ (true|on|1) ]]; then
-    log_info "Installing Socket CLI (socket@${VERSION})"
-    npm install -g "socket@${VERSION}"
-  else
-    log_error "Socket CLI not found and install is disabled. Install 'socket' or set install: true."
-    exit 1
+# One exit path cleans up both installation and annotation files. Explicit
+# signal exits ensure cancellation also reaches EXIT, retaining its exit status.
+# shellcheck disable=SC2329 # Invoked by the EXIT trap.
+cleanup() {
+  local status=$?
+  if [[ -n "${SOCKET_INSTALL_DIR:-}" ]]; then
+    rm -rf "${SOCKET_INSTALL_DIR}" || true
   fi
+  rm -f "${ANNOTATION_FILE:-}" "${TRUNCATED_ANNOTATION_FILE:-}" || true
+  return "${status}"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# --- Ensure the Socket CLI is available ------------------------------------
+SOCKET_COMMAND="socket"
+if [[ "${INSTALL}" =~ (true|on|1) ]]; then
+  # Use a private prefix so a stale PATH client cannot override the requested
+  # version, and concurrent steps do not replace each other's global install.
+  SOCKET_INSTALL_DIR="$(mktemp -d "${TMPDIR:-/tmp}/socket-cli.XXXXXX")"
+  log_info "Installing Socket CLI (socket@${VERSION})"
+  npm install -g --prefix "${SOCKET_INSTALL_DIR}" "socket@${VERSION}"
+  SOCKET_COMMAND="${SOCKET_INSTALL_DIR}/bin/socket"
+elif ! command_exists socket; then
+  log_error "Socket CLI not found and install is disabled. Install 'socket' or set install: true."
+  exit 1
 fi
 
 # --- Build the command ------------------------------------------------------
 # --no-interactive ensures the CLI never blocks on a prompt in CI (for example,
 # when the org cannot be resolved); it fails fast instead.
-cmd=(socket scan create --no-interactive)
+cmd=("${SOCKET_COMMAND}" scan create --no-interactive)
 
 if [[ "${REPORT}" =~ (true|on|1) ]]; then
   cmd+=(--report)
@@ -124,7 +143,6 @@ fi
 
 ANNOTATION_FILE="$(mktemp "${TMPDIR:-/tmp}/socket-annotation.XXXXXX")"
 TRUNCATED_ANNOTATION_FILE="${ANNOTATION_FILE}.truncated"
-trap 'rm -f "${ANNOTATION_FILE}" "${TRUNCATED_ANNOTATION_FILE}"' EXIT
 
 # Socket sends only the Markdown payload to stdout in this mode. Keep showing
 # it in the job log while retaining a copy for the Buildkite annotation.

@@ -48,7 +48,7 @@ configuration:
       description: Version of the Socket CLI npm package to install. Defaults to latest.
     install:
       type: boolean
-      description: Install the Socket CLI via npm if it is not already available. Defaults to true.
+      description: Install the selected Socket CLI via npm in a temporary step-local prefix. Defaults to true. When false, use socket from PATH and ignore version.
     args:
       type: [string, array]
       description: Additional arguments passed through to the Socket CLI.
