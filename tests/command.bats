@@ -7,6 +7,7 @@ load "$BATS_PLUGIN_PATH/load.bash"
 
 setup() {
   export SOCKET_SECURITY_API_KEY="test-token"
+  export BUILDKITE_PLUGIN_SOCKET_INSTALL="false"
   export BUILDKITE_PIPELINE_SLUG="my-repo"
   export BUILDKITE_BRANCH="main"
 }
@@ -352,4 +353,113 @@ EOF
   assert_output --partial "policy violation"
 
   unstub socket
+}
+
+
+# Fake only npm acquisition: the installed CLI is distinct from the stale PATH
+# executable, and records its prefix so cleanup can be verified after the hook.
+prepare_install() {
+  export BUILDKITE_PLUGIN_SOCKET_INSTALL="true"
+  export INSTALL_RECORD="${BATS_TEST_TMPDIR}/install-prefix"
+  export NPM_RECORD="${BATS_TEST_TMPDIR}/npm-args"
+  mkdir -p "${BATS_TEST_TMPDIR}/bin"
+  cat > "${BATS_TEST_TMPDIR}/bin/npm" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$@" > "$NPM_RECORD"
+[[ "$1" = install && "$2" = -g && "$3" = --prefix ]] || exit 90
+printf '%s' "$4" > "$INSTALL_RECORD"
+[[ "${FAIL_INSTALL:-false}" != true ]] || exit 42
+mkdir -p "$4/bin"
+printf '#!/usr/bin/env bash\necho selected-cli "$@"\n' > "$4/bin/socket"
+chmod +x "$4/bin/socket"
+EOF
+  cat > "${BATS_TEST_TMPDIR}/bin/socket" <<'EOF'
+#!/usr/bin/env bash
+echo stale-path-cli
+exit 91
+EOF
+  chmod +x "${BATS_TEST_TMPDIR}/bin/"*
+  export PATH="${BATS_TEST_TMPDIR}/bin:${PATH}"
+}
+
+@test "Installs latest by default instead of reusing a PATH socket" {
+  prepare_install
+  unset BUILDKITE_PLUGIN_SOCKET_INSTALL
+
+  run "$PWD/hooks/command"
+
+  assert_success
+  assert_output --partial "selected-cli scan create"
+  refute_output --partial "stale-path-cli"
+  [ "$(tail -1 "$NPM_RECORD")" = socket@latest ]
+  [ ! -e "$(cat "$INSTALL_RECORD")" ]
+}
+
+@test "Installs an explicit pin instead of reusing a PATH socket" {
+  prepare_install
+  export BUILDKITE_PLUGIN_SOCKET_VERSION="1.2.3"
+
+  run "$PWD/hooks/command"
+
+  assert_success
+  assert_output --partial "selected-cli scan create"
+  [ "$(tail -1 "$NPM_RECORD")" = socket@1.2.3 ]
+  [ ! -e "$(cat "$INSTALL_RECORD")" ]
+}
+
+@test "Does not fall back to a PATH socket when installation fails" {
+  prepare_install
+  export FAIL_INSTALL=true
+
+  run "$PWD/hooks/command"
+
+  [ "$status" -eq 42 ]
+  refute_output --partial "stale-path-cli"
+  refute_output --partial "selected-cli"
+  [ ! -e "$(cat "$INSTALL_RECORD")" ]
+}
+
+@test "Fails clearly when install is disabled and socket is missing" {
+  stub socket
+  rm -f "$(command -v socket)"
+
+  run "$PWD/hooks/command"
+
+  assert_failure
+  assert_output --partial "Socket CLI not found and install is disabled"
+}
+
+
+@test "Installs the selected CLI when no socket is on PATH" {
+  prepare_install
+  rm "${BATS_TEST_TMPDIR}/bin/socket"
+
+  run "$PWD/hooks/command"
+
+  assert_success
+  assert_output --partial "selected-cli scan create"
+  [ ! -e "$(cat "$INSTALL_RECORD")" ]
+}
+
+@test "Cleans up the installed CLI after annotation success or scan failure" {
+  prepare_install
+  export BUILDKITE_PLUGIN_SOCKET_ANNOTATE=true
+  export BUILDKITE_JOB_ID=install-cleanup
+  stub buildkite-agent \
+    "annotate --style success --context socket-install-cleanup : cat >/dev/null" \
+    "annotate --style error --context socket-install-cleanup : cat >/dev/null"
+
+  run "$PWD/hooks/command"
+
+  assert_success
+  [ ! -e "$(cat "$INSTALL_RECORD")" ]
+
+  # Make the installed CLI fail; both traps must still clean up the prefix.
+  sed -i.bak 's/echo selected-cli/exit 7; echo selected-cli/' "${BATS_TEST_TMPDIR}/bin/npm"
+
+  run "$PWD/hooks/command"
+
+  [ "$status" -eq 7 ]
+  [ ! -e "$(cat "$INSTALL_RECORD")" ]
+  unstub buildkite-agent
 }

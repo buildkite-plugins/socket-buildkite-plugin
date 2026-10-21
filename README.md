@@ -92,11 +92,11 @@ Branch name to associate the scan with. Defaults to `$BUILDKITE_BRANCH`.
 
 ### `version` (string)
 
-Version of the [`socket`](https://www.npmjs.com/package/socket) npm package to install when the CLI is not already present. Defaults to `latest`.
+Version of the [`socket`](https://www.npmjs.com/package/socket) npm package to install when `install` is enabled. Defaults to `latest`.
 
 ### `install` (boolean)
 
-Install the Socket CLI via `npm install -g` if it is not already on the agent's `PATH`. Defaults to `true`. Set to `false` if you pre-install the CLI on your agents.
+Install the selected Socket CLI version via npm into a temporary, step-local prefix and run that executable, regardless of any existing `socket` on `PATH`. Defaults to `true`. The temporary installation is removed when the hook exits. Set to `false` to use a pre-installed `socket` from your agents' `PATH`; in that mode, `version` does not apply.
 
 ### `args` (string or array)
 
@@ -114,6 +114,7 @@ steps:
 ## Requirements
 
 - `node` and `npm` available on the agent (used to install the Socket CLI when `install` is enabled).
+- Node/npm and their effective CA configuration are managed by the agent environment. Selecting a Socket CLI version does not update Node or remediate its certificate trust.
 - A Socket API token. See [Create Socket API Key for CI/CD](https://docs.socket.dev/docs/create-socket-api-key-for-cicd).
 
 ## Developing
