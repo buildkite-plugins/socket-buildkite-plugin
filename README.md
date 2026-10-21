@@ -115,6 +115,7 @@ steps:
 
 - `node` and `npm` available on the agent (used to install the Socket CLI when `install` is enabled).
 - Node/npm and their effective CA configuration are managed by the agent environment. Selecting a Socket CLI version does not update Node or remediate its certificate trust.
+- Installation inherits the hook environment, including the Socket API token and npm authentication settings; npm lifecycle scripts can access these variables.
 - A Socket API token. See [Create Socket API Key for CI/CD](https://docs.socket.dev/docs/create-socket-api-key-for-cicd).
 
 ## Developing

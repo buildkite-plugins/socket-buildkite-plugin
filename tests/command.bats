@@ -454,7 +454,7 @@ EOF
   assert_success
   [ ! -e "$(cat "$INSTALL_RECORD")" ]
 
-  # Make the installed CLI fail; both traps must still clean up the prefix.
+  # Make the installed CLI fail; cleanup must preserve the scan status.
   sed -i.bak 's/echo selected-cli/exit 7; echo selected-cli/' "${BATS_TEST_TMPDIR}/bin/npm"
 
   run "$PWD/hooks/command"
@@ -462,4 +462,34 @@ EOF
   [ "$status" -eq 7 ]
   [ ! -e "$(cat "$INSTALL_RECORD")" ]
   unstub buildkite-agent
+}
+
+@test "Cleans up the installation prefix when the hook receives TERM" {
+  prepare_install
+  cat > "${BATS_TEST_TMPDIR}/bin/npm" <<'EOF'
+#!/usr/bin/env bash
+printf '%s' "$4" > "$INSTALL_RECORD"
+mkdir -p "$4/bin"
+# Remain in the install long enough for the test to cancel the hook.
+sleep 2
+EOF
+
+  "$PWD/hooks/command" > "${BATS_TEST_TMPDIR}/cancel.log" 2>&1 &
+  local hook_pid=$!
+  local ready=false
+  local attempt
+  for attempt in {1..100}; do
+    if [[ -s "$INSTALL_RECORD" ]] && [[ -d "$(cat "$INSTALL_RECORD")/bin" ]]; then
+      ready=true
+      break
+    fi
+    sleep 0.05
+  done
+  kill -TERM "$hook_pid"
+  local cancel_status=0
+  wait "$hook_pid" || cancel_status=$?
+
+  [ "$ready" = true ]
+  [ "$cancel_status" -eq 143 ]
+  [ ! -e "$(cat "$INSTALL_RECORD")" ]
 }
